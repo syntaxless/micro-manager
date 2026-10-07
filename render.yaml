@@ -1,0 +1,16 @@
+# One-click deploy on Render: https://render.com/deploy?repo=https://github.com/syntaxless/micro-manager
+services:
+  - type: web
+    name: micro-manager
+    runtime: docker
+    plan: starter # persistent disks need a paid instance (about $7/month)
+    healthCheckPath: /api/health
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 5
+    envVars:
+      - key: DATA_DIR
+        value: /data
+      - key: TRUST_PROXY
+        value: "true"

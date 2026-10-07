@@ -1,31 +1,97 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { all, getSetting, one, setSetting } from '../db.js';
-import { requireAdmin, requireAuth, isStaff } from '../auth.js';
-import { config, stripeEnabled } from '../config.js';
+import { HttpError, requireAdmin, requireAuth, isStaff } from '../auth.js';
+import { appUrl, currency, stripeEnabled, stripeKey, stripeKeyFromEnv, stripeTestMode, webhookSecret } from '../prefs.js';
+import { verifyStripeKey } from '../stripe.js';
+import { loadExampleData, removeExampleData } from '../examples.js';
 import { parse } from '../util.js';
 import { THEME_IDS } from '../themes.js';
 import { ACTIVE_SUB_STATUSES, hasActiveSubscription } from '../access.js';
 
 export const settingsRouter = Router();
 
+const CURRENCIES = ['usd', 'eur', 'gbp', 'cad', 'aud', 'nzd', 'chf', 'sek', 'nok', 'dkk', 'jpy', 'sgd', 'hkd', 'mxn', 'brl', 'inr', 'zar'] as const;
+
 settingsRouter.patch('/settings', requireAdmin, (req, res) => {
   const body = parse(
-    z.object({ businessName: z.string().trim().min(1).max(100).optional(), defaultTheme: z.enum(THEME_IDS).optional() }),
+    z.object({
+      businessName: z.string().trim().min(1).max(100).optional(),
+      defaultTheme: z.enum(THEME_IDS).optional(),
+      currency: z.enum(CURRENCIES).optional(),
+      demoPayments: z.boolean().optional(),
+      appUrl: z.union([z.url({ protocol: /^https?$/ }), z.literal('')]).optional(),
+      webhookSecret: z.union([z.string().trim().regex(/^whsec_\w+$/, 'Webhook secrets start with whsec_'), z.literal('')]).optional(),
+      onboarded: z.boolean().optional(),
+      checklistDismissed: z.boolean().optional(),
+    }),
     req.body,
   );
   if (body.businessName) setSetting('business_name', body.businessName);
   if (body.defaultTheme) setSetting('default_theme', body.defaultTheme);
-  res.json({ businessName: getSetting('business_name', 'Micro Manager'), defaultTheme: getSetting('default_theme', 'tokyo-night') });
+  if (body.currency) setSetting('currency', body.currency);
+  if (body.demoPayments !== undefined) setSetting('demo_payments', body.demoPayments ? '1' : '0');
+  if (body.appUrl !== undefined) setSetting('app_url', body.appUrl ? new URL(body.appUrl).origin : '');
+  if (body.webhookSecret !== undefined) setSetting('stripe_webhook_secret', body.webhookSecret);
+  if (body.onboarded !== undefined) setSetting('onboarded', body.onboarded ? '1' : '0');
+  if (body.checklistDismissed !== undefined) setSetting('checklist_dismissed', body.checklistDismissed ? '1' : '0');
+  res.json({ ok: true });
 });
 
-settingsRouter.get('/settings/stripe', requireAdmin, (_req, res) => {
-  res.json({
+function stripeStatus() {
+  const key = stripeKey();
+  return {
     enabled: stripeEnabled(),
-    testMode: config.stripeSecretKey.startsWith('sk_test_') || config.stripeSecretKey.startsWith('rk_test_'),
-    webhookConfigured: config.stripeWebhookSecret.length > 0,
-    webhookUrl: `${config.appUrl}/api/stripe/webhook`,
-  });
+    testMode: stripeTestMode(),
+    fromEnv: stripeKeyFromEnv(),
+    keyHint: key ? `${key.slice(0, 8)}…${key.slice(-4)}` : null,
+    accountName: getSetting('stripe_account_name') || null,
+    webhookConfigured: webhookSecret().length > 0,
+    webhookUrl: `${appUrl()}/api/stripe/webhook`,
+    appUrl: appUrl(),
+    currency: currency(),
+    demoPayments: getSetting('demo_payments') === '1',
+  };
+}
+
+settingsRouter.get('/settings/stripe', requireAdmin, (_req, res) => {
+  res.json(stripeStatus());
+});
+
+/** Connects Stripe by pasting a secret key. The key is checked with Stripe before it's saved. */
+settingsRouter.post('/settings/stripe', requireAdmin, async (req, res) => {
+  if (stripeKeyFromEnv()) throw new HttpError(400, 'Stripe is set by the server configuration (STRIPE_SECRET_KEY).');
+  const { secretKey } = parse(z.object({ secretKey: z.string().trim().max(300) }), req.body);
+  if (/^pk_/.test(secretKey)) throw new HttpError(400, 'That is the publishable key. Paste the secret key instead (it starts with sk_).');
+  if (!/^(sk|rk)_(test|live)_\w+$/.test(secretKey)) throw new HttpError(400, 'Stripe secret keys start with sk_test_ or sk_live_.');
+  let name: string | null;
+  try {
+    name = await verifyStripeKey(secretKey);
+  } catch (e) {
+    const err = e as { type?: string; message?: string };
+    if (err.type === 'StripeAuthenticationError') throw new HttpError(400, 'Stripe did not accept that key. Copy it again from your Stripe dashboard.');
+    throw new HttpError(502, `Couldn't reach Stripe: ${err.message ?? 'unknown error'}`);
+  }
+  setSetting('stripe_secret_key', secretKey);
+  setSetting('stripe_account_name', name ?? '');
+  res.json(stripeStatus());
+});
+
+settingsRouter.delete('/settings/stripe', requireAdmin, (_req, res) => {
+  if (stripeKeyFromEnv()) throw new HttpError(400, 'Stripe is set by the server configuration (STRIPE_SECRET_KEY).');
+  setSetting('stripe_secret_key', '');
+  setSetting('stripe_account_name', '');
+  res.json(stripeStatus());
+});
+
+settingsRouter.post('/settings/example-data', requireAdmin, (req, res) => {
+  loadExampleData(req.user!.id);
+  res.json({ ok: true });
+});
+
+settingsRouter.delete('/settings/example-data', requireAdmin, (_req, res) => {
+  removeExampleData();
+  res.json({ ok: true });
 });
 
 const n = (sql: string, ...p: (string | number)[]) => one<{ n: number }>(sql, ...p)!.n;
@@ -75,6 +141,20 @@ settingsRouter.get('/dashboard', requireAuth, (req, res) => {
     clients: scoped ? null : n('SELECT COUNT(*) n FROM clients'),
     files: n(`SELECT COUNT(*) n FROM files f WHERE 1=1 ${w('f')}`),
     activeSubscription: scoped ? hasActiveSubscription(cid) : null,
-    currency: config.currency,
+    currency: currency(),
+    checklist: u.role === 'admin' && getSetting('checklist_dismissed') !== '1' ? gettingStarted() : null,
   });
 });
+
+/** "Getting started" steps for a new studio; example clients don't count. */
+function gettingStarted() {
+  const real = 'JOIN clients c ON c.id = x.client_id AND c.is_example = 0';
+  const has = (sql: string) => !!one(sql);
+  return [
+    { key: 'client', done: has('SELECT 1 FROM clients WHERE is_example = 0') },
+    { key: 'invite', done: has(`SELECT 1 FROM users x ${real} WHERE x.role = 'client'`) },
+    { key: 'stripe', done: stripeEnabled() },
+    { key: 'file', done: has(`SELECT 1 FROM files x ${real}`) },
+    { key: 'invoice', done: has(`SELECT 1 FROM invoices x ${real} WHERE x.status != 'draft'`) },
+  ];
+}

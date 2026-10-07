@@ -24,50 +24,66 @@ One Node process, one SQLite file, one uploads folder. No external services are 
 - **Command palette** (`⌘K` / `Ctrl+K`) to jump around and live-preview themes.
 - Roles: **admin** (everything, plus team and workspace settings), **member** (manages clients, files and billing), **client** (their own portal).
 
-## Quick start
+## Get started
 
-### Docker
+Pick whichever fits you. Each one ends the same way: open the address in your browser and a few setup screens walk you through creating your account, picking a look, connecting payments (optional) and loading example data to explore.
+
+### Option 1: One click in the cloud (easiest)
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/syntaxless/micro-manager)
+
+1. Click the button and sign up for Render (free account).
+2. Click **Deploy**. Render runs Micro Manager on its Starter plan (about $7 a month) with a disk for your files.
+3. When it says **Live**, open the address Render shows you (something like `micro-manager-xxxx.onrender.com`).
+
+You can add your own domain later under the service's **Settings → Custom Domains** in Render.
+
+### Option 2: Your own server, one command
+
+Rent any small Linux server (DigitalOcean, Hetzner, Linode, etc., about $5 a month), log in to it, and paste:
 
 ```bash
-cp .env.example .env        # optional: add Stripe test keys, set APP_URL
-docker compose up -d
-open http://localhost:3000  # the first visit asks you to create the admin account
+curl -fsSL https://raw.githubusercontent.com/syntaxless/micro-manager/main/install.sh | bash
 ```
 
-Data lives in the `micro-manager-data` volume (`/data` in the container): `micro-manager.db` plus an `uploads/` folder. Back up that folder and you have everything.
+It installs everything it needs and asks one question: your domain name. If you have one, point it at the server first and you get HTTPS automatically. If not, just press Enter. Run the same command again any time to update; your data is kept.
 
-### Node (22.13+)
+### Option 3: On your own computer, to try it out
 
-```bash
-npm install
-npm run build
-npm start                   # http://localhost:3000
-```
+1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) and open it.
+2. Download [docker-compose.yml](https://raw.githubusercontent.com/syntaxless/micro-manager/main/docker-compose.yml) into a folder.
+3. In that folder, run `docker compose up -d`, then open http://localhost:3000.
 
-Want to look around first? `npm run seed` (after a build) fills an empty database with demo clients, requests, files and an invoice. Logins: `admin@example.com`, `client@example.com`, `lumen@example.com`, all with password `password123`.
+### After setup
 
-## Configuration
+- **Getting paid:** in **Settings → Payments**, paste your Stripe secret key (the setup screen links you to the right page in Stripe). No Stripe? You can still send invoices and mark them paid by hand.
+- **Inviting clients:** add a client under **Clients**, then **Invite**. They get a link to choose a password.
+- **Backups:** everything (database and files) lives in one folder: `data/` next to the installer, or the disk in Render. Copy that folder and you have it all.
+
+## Configuration (advanced)
+
+Everything above is set inside the app. You only need these environment variables if you want to override those settings or tune the server.
 
 | Variable | Default | |
 | --- | --- | --- |
 | `PORT` | `3000` | |
-| `APP_URL` | `http://localhost:3000` | Public URL. Used in invite links and Stripe redirects. An `https://` URL turns on secure cookies. |
+| `APP_URL` | from setup | Public URL used in invite links and Stripe redirects. Detected during setup; also editable in Settings. |
 | `DATA_DIR` | `./data` | Database and uploads. |
 | `MAX_UPLOAD_MB` | `200` | Per-file upload limit. |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | | Creates the first admin on boot instead of using the setup screen. |
-| `STRIPE_SECRET_KEY` | | `sk_test_…` while testing. Leave empty for demo billing. |
-| `STRIPE_WEBHOOK_SECRET` | | `whsec_…`, optional (see below). |
+| `STRIPE_SECRET_KEY` | | Overrides the key saved in Settings. |
+| `STRIPE_WEBHOOK_SECRET` | | Overrides the webhook secret saved in Settings. |
 | `DEMO_PAYMENTS` | `false` | Without Stripe, lets clients simulate payments. Testing only. |
-| `CURRENCY` | `usd` | Currency for new invoices and subscriptions. |
+| `CURRENCY` | `usd` | Overrides the currency chosen in Settings. |
 | `TRUST_PROXY` | `loopback` | Express `trust proxy` setting when running behind a reverse proxy. |
 
 ## Stripe
 
-1. Put a **test** secret key in `STRIPE_SECRET_KEY` and restart. Billing pages show a "stripe test mode" tag.
+1. Paste a secret key in **Settings → Payments** (or set `STRIPE_SECRET_KEY`). Test keys (`sk_test_…`) show a "stripe test mode" tag.
 2. Create an invoice and choose **Create & send**. Micro Manager creates the customer, the invoice and its line items in Stripe, finalizes it and asks Stripe to email it. Clients pay on Stripe's hosted page.
 3. Create a subscription. The client clicks **Start subscription** and pays through Stripe Checkout (or you copy the checkout link and send it).
 
-Statuses are pulled from Stripe whenever someone opens Billing, so a self-hosted box that Stripe can't reach still stays correct. For instant updates, add a webhook endpoint at `APP_URL/api/stripe/webhook` listening to `invoice.*`, `customer.subscription.*` and `checkout.session.completed`, and set `STRIPE_WEBHOOK_SECRET`. Locally you can use the Stripe CLI:
+Statuses are pulled from Stripe whenever someone opens Billing, so a self-hosted box that Stripe can't reach still stays correct. For instant updates, add a webhook endpoint at `APP_URL/api/stripe/webhook` listening to `invoice.*`, `customer.subscription.*` and `checkout.session.completed`, and paste its signing secret under **Settings → Payments → Advanced**. Locally you can use the Stripe CLI:
 
 ```bash
 stripe listen --forward-to localhost:3000/api/stripe/webhook
@@ -75,7 +91,7 @@ stripe listen --forward-to localhost:3000/api/stripe/webhook
 
 To let clients update their card or cancel, save a customer portal configuration once in the Stripe dashboard (Settings → Billing → Customer portal).
 
-**Without Stripe**, issuing an invoice just marks it open and you record payments with **Mark paid**; subscriptions are activated by hand. To try the client side of the flow, set `DEMO_PAYMENTS=true` (it's on in `.env.example`): clients then get a "Pay" button that records a simulated payment. Turn it off before real clients log in, since it lets them mark their own invoices paid.
+**Without Stripe**, issuing an invoice just marks it open and you record payments with **Mark paid**; subscriptions are activated by hand. To try the client side of the flow, turn on **Practice mode** in Settings → Payments (or set `DEMO_PAYMENTS=true`): clients then get a "Pay" button that records a simulated payment. Turn it off before real clients log in, since it lets them mark their own invoices paid.
 
 ## How file locking works
 
@@ -90,11 +106,14 @@ Otherwise it shows as locked with the reason (for example "Unlocks when invoice 
 
 ## Development
 
+Node 22.13 or newer.
+
 ```bash
 npm install
 npm run dev        # API on :3000 with reload, Vite on :5173 (open this one)
 npm test           # API tests, including a faked Stripe flow
 npm run typecheck
+npm run build && npm run seed && npm start   # demo data; logins admin@example.com / client@example.com, password123
 ```
 
 The stack is Express 5 + Node's built-in `node:sqlite` on the server and React 19 + Vite + dnd-kit on the client, all TypeScript. Themes live in `shared/themes.ts`; adding one is a single line.

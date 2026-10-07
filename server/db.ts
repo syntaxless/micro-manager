@@ -124,6 +124,13 @@ CREATE INDEX IF NOT EXISTS idx_invoices_client ON invoices(client_id);
 CREATE INDEX IF NOT EXISTS idx_subs_client ON subscriptions(client_id);
 `);
 
+// Lightweight migrations for columns added after the first release.
+function addColumn(table: string, column: string, ddl: string) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (!cols.some((c) => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+}
+addColumn('clients', 'is_example', 'is_example INTEGER NOT NULL DEFAULT 0');
+
 type Params = SQLInputValue[];
 
 export function one<T>(sql: string, ...params: Params): T | undefined {

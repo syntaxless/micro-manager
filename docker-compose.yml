@@ -1,15 +1,13 @@
+# Start:   docker compose up -d
+# Update:  docker compose pull && docker compose up -d
+# Then open http://localhost:3000 and follow the setup screens.
 services:
   micro-manager:
-    build: .
-    image: micro-manager
+    image: ghcr.io/syntaxless/micro-manager:latest
+    # To build from this folder instead of downloading, replace the line above with:  build: .
     restart: unless-stopped
     ports:
       - "3000:3000"
-    env_file:
-      - path: .env
-        required: false
-    environment:
-      APP_URL: ${APP_URL:-http://localhost:3000}
     volumes:
       - micro-manager-data:/data
 

@@ -1,5 +1,6 @@
 import { createApp } from './app.js';
-import { config, stripeEnabled } from './config.js';
+import { config } from './config.js';
+import { appUrl, stripeEnabled } from './prefs.js';
 import { one, run } from './db.js';
 import { hashPassword } from './auth.js';
 
@@ -13,6 +14,6 @@ if (config.adminEmail && config.adminPassword && !one('SELECT 1 FROM users LIMIT
 setInterval(() => run('DELETE FROM sessions WHERE expires_at < ?', new Date().toISOString()), 3600_000).unref();
 
 createApp().listen(config.port, () => {
-  console.log(`Micro Manager listening on :${config.port} (${config.appUrl})`);
-  console.log(stripeEnabled() ? 'Stripe: enabled' : 'Stripe: not configured, running in demo billing mode');
+  console.log(`Micro Manager listening on :${config.port} (${appUrl()})`);
+  console.log(stripeEnabled() ? 'Stripe: enabled' : 'Stripe: not connected yet (connect it from Settings)');
 });

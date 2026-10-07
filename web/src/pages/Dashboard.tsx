@@ -1,7 +1,8 @@
 import { Link } from 'react-router-dom';
-import { useApi } from '../api';
+import { api, useApi } from '../api';
 import { useAuth } from '../auth';
-import { Badge, Empty, Skeleton } from '../components/ui';
+import { Badge, Empty, Skeleton, Spinner, useConfirm, useToast } from '../components/ui';
+import { useState } from 'react';
 import { Icon } from '../components/Icon';
 import { STATUS_LABEL, STATUS_TONE, PRIORITY_TONE, ago, dueState, money, shortDate } from '../format';
 import { tone } from '../theme';
@@ -18,13 +19,14 @@ interface Dash {
   files: number;
   activeSubscription: boolean | null;
   currency: string;
+  checklist: { key: string; done: boolean }[] | null;
 }
 
 const ORDER = ['backlog', 'queued', 'in_progress', 'review', 'done'];
 
 export function Dashboard() {
   const auth = useAuth();
-  const { data } = useApi<Dash>('/dashboard');
+  const { data, reload } = useApi<Dash>('/dashboard');
   const hour = new Date().getHours();
   const greet = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
   const total = data?.byStatus.reduce((a, b) => a + b.n, 0) ?? 0;
@@ -43,6 +45,9 @@ export function Dashboard() {
           <Icon name="plus" /> New request
         </Link>
       </header>
+
+      {auth.hasExampleData && <ExampleBanner onRemoved={reload} />}
+      {data?.checklist && <Checklist items={data.checklist} onDismiss={reload} />}
 
       <section className="stats">
         <Stat label="Active requests" value={data ? String(total - count('done')) : null} sub={data ? `${count('in_progress')} in progress` : ''} tone="blue" />
@@ -178,6 +183,89 @@ function ListSkeleton() {
       {[80, 60, 70].map((w, i) => (
         <Skeleton key={i} w={`${w}%`} />
       ))}
+    </div>
+  );
+}
+
+const STEPS: Record<string, { label: string; hint: string; to: string }> = {
+  client: { label: 'Add your first client', hint: 'A client is a company or person you work for.', to: '/clients?new=1' },
+  invite: { label: 'Invite them to their portal', hint: 'They get a link to set a password, then see their board, files and invoices.', to: '/clients' },
+  stripe: { label: 'Connect Stripe to get paid online', hint: 'Paste one key from your Stripe dashboard. Optional.', to: '/settings#payments' },
+  file: { label: 'Upload a file for a client', hint: 'Deliverables, drafts, source files.', to: '/files' },
+  invoice: { label: 'Send your first invoice', hint: 'Attach files and they unlock once it is paid.', to: '/billing?new=invoice' },
+};
+
+function Checklist({ items, onDismiss }: { items: { key: string; done: boolean }[]; onDismiss: () => void }) {
+  const done = items.filter((i) => i.done).length;
+  const dismiss = async () => {
+    await api('/settings', { method: 'PATCH', body: { checklistDismissed: true } });
+    onDismiss();
+  };
+  return (
+    <section className="card checklist">
+      <header className="card-head">
+        <div>
+          <h3>Getting started</h3>
+          <span className="muted sm">
+            {done} of {items.length} done
+          </span>
+        </div>
+        <button className="link sm" onClick={dismiss}>
+          {done === items.length ? 'Done, hide this' : 'Hide'}
+        </button>
+      </header>
+      <div className="progress thin">
+        <span style={{ width: `${(done / items.length) * 100}%` }} />
+      </div>
+      <ol className="checklist-items">
+        {items.map((i) => {
+          const s = STEPS[i.key];
+          if (!s) return null;
+          return (
+            <li key={i.key} className={i.done ? 'done' : ''}>
+              <Link to={s.to} className="row-link">
+                <span className="check-dot">{i.done && <Icon name="check" size={12} strokeWidth={3} />}</span>
+                <span className="grow">
+                  <strong>{s.label}</strong>
+                  <span className="muted sm">{s.hint}</span>
+                </span>
+                {!i.done && <Icon name="external" size={14} className="muted" />}
+              </Link>
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
+}
+
+function ExampleBanner({ onRemoved }: { onRemoved: () => void }) {
+  const auth = useAuth();
+  const confirm = useConfirm();
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  if (auth.user?.role !== 'admin') return null;
+  const remove = async () => {
+    if (!(await confirm({ title: 'Remove the example data?', body: 'This deletes the two example clients and everything attached to them. Your own clients are not touched.', confirm: 'Remove examples', danger: true }))) return;
+    setBusy(true);
+    try {
+      await api('/settings/example-data', { method: 'DELETE' });
+      await auth.refresh();
+      onRemoved();
+      toast('Example data removed');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="banner">
+      <Icon name="board" />
+      <span className="grow">
+        You're looking at <b>example data</b> (Nova Coffee and Lumen Labs). Explore freely, then remove it when you're ready.
+      </span>
+      <button className="btn sm" onClick={remove} disabled={busy}>
+        {busy ? <Spinner size={12} /> : 'Remove examples'}
+      </button>
     </div>
   );
 }

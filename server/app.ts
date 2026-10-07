@@ -12,13 +12,15 @@ import { projectsRouter } from './routes/projects.js';
 import { filesRouter } from './routes/files.js';
 import { billingRouter } from './routes/billing.js';
 import { settingsRouter } from './routes/settings.js';
-import { config } from './config.js';
+import { webhookSecret } from './prefs.js';
 import { handleWebhookEvent, stripe } from './stripe.js';
 
 export function createApp() {
   const app = express();
   app.disable('x-powered-by');
-  app.set('trust proxy', process.env.TRUST_PROXY ?? 'loopback');
+  // Behind a hosting platform or reverse proxy, TRUST_PROXY=true (or a hop count) makes HTTPS detection work.
+  const tp = (process.env.TRUST_PROXY ?? 'loopback').trim();
+  app.set('trust proxy', tp === 'true' ? true : tp === 'false' ? false : /^\d+$/.test(tp) ? Number(tp) : tp);
 
   app.use((_req, res, next) => {
     res.setHeader('X-Frame-Options', 'DENY');
@@ -29,10 +31,11 @@ export function createApp() {
 
   // Stripe needs the raw body to verify signatures, so this route comes before the JSON parser.
   app.post('/api/stripe/webhook', express.raw({ type: 'application/json', limit: '1mb' }), async (req, res) => {
-    if (!config.stripeWebhookSecret) return res.status(400).json({ error: 'Webhook secret not configured' });
+    const secret = webhookSecret();
+    if (!secret) return res.status(400).json({ error: 'Webhook secret not configured' });
     let event;
     try {
-      event = stripe().webhooks.constructEvent(req.body, req.get('stripe-signature') ?? '', config.stripeWebhookSecret);
+      event = stripe().webhooks.constructEvent(req.body, req.get('stripe-signature') ?? '', secret);
     } catch (e) {
       return res.status(400).json({ error: `Signature check failed: ${(e as Error).message}` });
     }

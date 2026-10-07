@@ -12,6 +12,7 @@ import { Files } from './pages/Files';
 import { Billing } from './pages/Billing';
 import { Clients } from './pages/Clients';
 import { Settings } from './pages/Settings';
+import { Onboarding } from './pages/Onboarding';
 
 export function App() {
   const auth = useAuth();
@@ -26,6 +27,7 @@ export function App() {
   }
   if (auth.needsSetup) return <Setup />;
   if (!auth.user) return <Login />;
+  if (auth.user.role === 'admin' && !auth.onboarded) return <Onboarding />;
   return <Shell />;
 }
 

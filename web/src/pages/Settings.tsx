@@ -1,5 +1,6 @@
-import { useState, type FormEvent } from 'react';
-import { api, useApi, type Me } from '../api';
+import { useEffect, useState, type FormEvent } from 'react';
+import { api, useApi, type Me, type StripeStatus } from '../api';
+import { StripeConnect } from '../components/StripeConnect';
 import { useAuth } from '../auth';
 import { Avatar, Badge, Field, Spinner, useConfirm, useToast } from '../components/ui';
 import { Icon } from '../components/Icon';
@@ -20,9 +21,10 @@ export function Settings() {
       <Profile />
       {auth.user?.role === 'admin' && (
         <>
+          <Payments />
           <Workspace />
           <Team />
-          <StripeStatus />
+          <ExampleData />
         </>
       )}
     </>
@@ -231,37 +233,119 @@ function Team() {
   );
 }
 
-function StripeStatus() {
-  const { data } = useApi<{ enabled: boolean; testMode: boolean; webhookConfigured: boolean; webhookUrl: string }>('/settings/stripe');
-  if (!data) return null;
+function Payments() {
+  const auth = useAuth();
+  const toast = useToast();
+  const [st, setSt] = useState<StripeStatus | null>(null);
+  const [appUrl, setAppUrl] = useState('');
+  const [hook, setHook] = useState('');
+  useEffect(() => {
+    api<StripeStatus>('/settings/stripe').then((s) => (setSt(s), setAppUrl(s.appUrl)));
+    if (window.location.hash === '#payments') setTimeout(() => document.getElementById('payments')?.scrollIntoView({ behavior: 'smooth' }), 200);
+  }, []);
+  const save = async (body: Record<string, unknown>, msg = 'Saved') => {
+    try {
+      await api('/settings', { method: 'PATCH', body });
+      setSt(await api<StripeStatus>('/settings/stripe'));
+      await auth.refresh();
+      toast(msg);
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    }
+  };
+  return (
+    <section className="card settings-card" id="payments">
+      <header className="card-head">
+        <h3>
+          <Icon name="card" /> Payments
+        </h3>
+      </header>
+      <div className="stack">
+        <StripeConnect status={st} onChange={setSt} />
+        {st && (
+          <div className="row-2 narrow">
+            <Field label="Currency" hint="Used for new invoices and subscriptions">
+              <select value={st.currency} onChange={(e) => save({ currency: e.target.value }, 'Currency updated')}>
+                {['usd', 'eur', 'gbp', 'cad', 'aud', 'nzd', 'chf', 'sek', 'nok', 'dkk', 'jpy', 'sgd', 'hkd', 'mxn', 'brl', 'inr', 'zar'].map((c) => (
+                  <option key={c} value={c}>
+                    {c.toUpperCase()}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </div>
+        )}
+        {st && !st.enabled && (
+          <label className="check wrap">
+            <input type="checkbox" checked={st.demoPayments} onChange={(e) => save({ demoPayments: e.target.checked })} />
+            <span>
+              <b>Practice mode:</b> let clients press "Pay" without Stripe, to try the whole flow. Turn this off before real clients sign in.
+            </span>
+          </label>
+        )}
+        {st && (
+          <details className="advanced">
+            <summary>Advanced</summary>
+            <div className="stack">
+              <Field label="Web address of this app" hint="Used in invite links and after Stripe payments. Filled in automatically during setup.">
+                <div className="connect-row">
+                  <input value={appUrl} onChange={(e) => setAppUrl(e.target.value)} placeholder="https://studio.example.com" />
+                  <button className="btn" onClick={() => save({ appUrl })} disabled={appUrl === st.appUrl}>
+                    Save
+                  </button>
+                </div>
+              </Field>
+              {st.enabled && (
+                <Field label="Stripe webhook signing secret (optional)" hint="Payments already update on their own. A webhook only makes them show up instantly.">
+                  <div className="stack" style={{ gap: 8 }}>
+                    <span className="muted sm">
+                      In Stripe, add an endpoint for <span className="mono">{st.webhookUrl}</span> with the events <span className="mono">invoice.*</span>, <span className="mono">customer.subscription.*</span> and{' '}
+                      <span className="mono">checkout.session.completed</span>, then paste its signing secret.
+                    </span>
+                    <div className="connect-row">
+                      <input className="mono" value={hook} onChange={(e) => setHook(e.target.value)} placeholder={st.webhookConfigured ? 'whsec_… (saved)' : 'whsec_…'} />
+                      <button className="btn" onClick={() => (save({ webhookSecret: hook.trim() }, 'Webhook saved'), setHook(''))} disabled={!hook.trim()}>
+                        Save
+                      </button>
+                    </div>
+                  </div>
+                </Field>
+              )}
+            </div>
+          </details>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function ExampleData() {
+  const auth = useAuth();
+  const toast = useToast();
+  const confirm = useConfirm();
+  const [busy, setBusy] = useState(false);
+  const run = async () => {
+    if (auth.hasExampleData && !(await confirm({ title: 'Remove the example data?', body: 'Deletes the example clients and everything attached to them.', confirm: 'Remove', danger: true }))) return;
+    setBusy(true);
+    try {
+      await api('/settings/example-data', { method: auth.hasExampleData ? 'DELETE' : 'POST' });
+      await auth.refresh();
+      toast(auth.hasExampleData ? 'Example data removed' : 'Example data added');
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <section className="card settings-card">
       <header className="card-head">
-        <h3>
-          <Icon name="card" /> Stripe
-        </h3>
-        {data.enabled ? <Badge tone={data.testMode ? 'yellow' : 'green'} dot>{data.testMode ? 'test mode' : 'live'}</Badge> : <Badge tone="muted">not connected</Badge>}
+        <h3>Example data</h3>
+        <button className="btn sm" onClick={run} disabled={busy}>
+          {busy ? <Spinner size={12} /> : auth.hasExampleData ? 'Remove examples' : 'Add examples'}
+        </button>
       </header>
-      {data.enabled ? (
-        <div className="stack">
-          <p className="muted sm">
-            Invoices are created and emailed by Stripe; subscriptions use Stripe Checkout. Statuses sync automatically when anyone opens Billing.
-          </p>
-          <p className="sm">
-            Webhook {data.webhookConfigured ? <Badge tone="green">configured</Badge> : <Badge tone="yellow">optional, not set</Badge>}
-          </p>
-          <div className="link-box">
-            <span className="mono truncate">{data.webhookUrl}</span>
-          </div>
-          <p className="muted sm">
-            Subscribe it to <span className="mono">invoice.*</span>, <span className="mono">customer.subscription.*</span> and <span className="mono">checkout.session.completed</span> for instant updates.
-          </p>
-        </div>
-      ) : (
-        <p className="muted sm">
-          Set <span className="mono">STRIPE_SECRET_KEY</span> (a <span className="mono">sk_test_…</span> key) and restart to bill through Stripe. Until then, mark invoices paid by hand. To try the client payment flow without Stripe, set <span className="mono">DEMO_PAYMENTS=true</span>.
-        </p>
-      )}
+      <p className="muted sm">Two sample clients with requests, files and an invoice, for exploring or demoing. Your real clients are never touched.</p>
     </section>
   );
 }

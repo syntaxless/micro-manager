@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { all, one, run, tx, type Client, type User } from '../db.js';
 import { HttpError, publicUser, randomToken, requireAdmin, requireStaff, destroyUserSessions } from '../auth.js';
 import { config } from '../config.js';
+import { appUrl } from '../prefs.js';
 import { idParam, parse } from '../util.js';
 import { ACTIVE_SUB_STATUSES } from '../access.js';
 
@@ -21,7 +22,7 @@ function issueInvite(userId: number) {
     new Date(Date.now() + INVITE_DAYS * 864e5).toISOString(),
     userId,
   );
-  return `${config.appUrl}/invite/${token}`;
+  return `${appUrl()}/invite/${token}`;
 }
 
 function createInvitedUser(email: string, name: string, role: User['role'], clientId: number | null) {

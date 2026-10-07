@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { api, useApi, type ClientRow } from '../api';
 import { useAuth } from '../auth';
 import { Avatar, Badge, CopyButton, Drawer, Empty, Field, Modal, Skeleton, Spinner, useConfirm, useToast } from '../components/ui';
@@ -12,7 +12,12 @@ const COLORS = ['blue', 'magenta', 'cyan', 'green', 'yellow', 'orange', 'red'];
 export function Clients() {
   const auth = useAuth();
   const { data, reload } = useApi<ClientRow[]>('/clients');
-  const [creating, setCreating] = useState(false);
+  const [params, setParams] = useSearchParams();
+  const [creating, setCreatingState] = useState(params.get('new') === '1');
+  const setCreating = (v: boolean) => {
+    setCreatingState(v);
+    if (!v && params.get('new')) setParams({}, { replace: true });
+  };
   const [open, setOpen] = useState<number | null>(null);
   const [q, setQ] = useState('');
   const shown = (data ?? []).filter((c) => `${c.name} ${c.company ?? ''} ${c.email ?? ''}`.toLowerCase().includes(q.toLowerCase()));
@@ -73,7 +78,9 @@ export function Clients() {
                 </div>
               </dl>
               <div className="client-card-foot">
-                {c.active_subscriptions > 0 ? (
+                {c.is_example ? (
+                  <Badge tone="magenta">example</Badge>
+                ) : c.active_subscriptions > 0 ? (
                   <Badge tone="green" dot>
                     subscribed
                   </Badge>

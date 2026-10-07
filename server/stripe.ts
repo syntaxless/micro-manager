@@ -1,19 +1,25 @@
 import Stripe from 'stripe';
-import { config, stripeEnabled } from './config.js';
+import { appUrl, stripeEnabled, stripeKey } from './prefs.js';
 import { all, one, run, type Client, type Invoice, type Subscription } from './db.js';
 import { HttpError } from './auth.js';
 
 let client: Stripe | null = null;
+let clientKey = '';
 
 export function stripe(): Stripe {
   if (!stripeEnabled()) throw new HttpError(400, 'Stripe is not configured');
-  if (!client) client = new Stripe(config.stripeSecretKey, { appInfo: { name: 'Micro Manager' } });
+  const key = stripeKey();
+  if (!client || (clientKey && clientKey !== key)) {
+    client = new Stripe(key, { appInfo: { name: 'Micro Manager' } });
+    clientKey = key;
+  }
   return client;
 }
 
 /** Lets tests swap in a fake Stripe client. */
 export function setStripeClient(fake: unknown) {
   client = fake as Stripe;
+  clientKey = '';
 }
 
 export async function ensureCustomer(clientId: number): Promise<string> {
@@ -216,8 +222,8 @@ export async function createCheckoutForSubscription(sub: Subscription) {
     mode: 'subscription',
     customer,
     line_items: [{ price: priceId, quantity: 1 }],
-    success_url: `${config.appUrl}/billing?subscribed=${sub.id}`,
-    cancel_url: `${config.appUrl}/billing`,
+    success_url: `${appUrl()}/billing?subscribed=${sub.id}`,
+    cancel_url: `${appUrl()}/billing`,
     client_reference_id: String(sub.id),
     subscription_data: { metadata: { mm_subscription_id: String(sub.id) } },
     metadata: { mm_subscription_id: String(sub.id) },
@@ -252,3 +258,20 @@ export async function handleWebhookEvent(event: Stripe.Event) {
       break;
   }
 }
+
+/** Checks a pasted secret key against Stripe and returns the account's display name, if any. */
+export let verifyStripeKey = async (key: string): Promise<string | null> => {
+  const s = new Stripe(key, { appInfo: { name: 'Micro Manager' }, maxNetworkRetries: 1, timeout: 15_000 });
+  try {
+    const acct = await s.accounts.retrieveCurrent();
+    return acct.settings?.dashboard?.display_name || acct.business_profile?.name || acct.email || null;
+  } catch (e) {
+    // Restricted keys may not read the account; any authenticated call proves the key works.
+    if ((e as { type?: string }).type === 'StripePermissionError') {
+      await s.balance.retrieve();
+      return null;
+    }
+    throw e;
+  }
+};
+export const setStripeKeyVerifier = (fn: typeof verifyStripeKey) => (verifyStripeKey = fn);

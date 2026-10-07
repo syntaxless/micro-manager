@@ -100,6 +100,8 @@ export interface AuthState {
   businessName: string;
   defaultTheme: string;
   currency: string;
+  onboarded: boolean;
+  hasExampleData: boolean;
 }
 export type Status = 'backlog' | 'queued' | 'in_progress' | 'review' | 'done';
 export type Priority = 'low' | 'medium' | 'high' | 'urgent';
@@ -149,6 +151,7 @@ export interface ClientRow {
   outstanding: number;
   active_subscriptions: number;
   user_count: number;
+  is_example: number;
 }
 export interface InvoiceRow {
   id: number;
@@ -181,4 +184,17 @@ export interface SubscriptionRow {
   stripe_subscription_id: string | null;
   current_period_end: string | null;
   created_at: string;
+}
+
+export interface StripeStatus {
+  enabled: boolean;
+  testMode: boolean;
+  fromEnv: boolean;
+  keyHint: string | null;
+  accountName: string | null;
+  webhookConfigured: boolean;
+  webhookUrl: string;
+  appUrl: string;
+  currency: string;
+  demoPayments: boolean;
 }

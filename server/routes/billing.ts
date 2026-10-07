@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { all, one, run, tx, type Invoice, type Subscription, type User } from '../db.js';
 import { HttpError, assertClientAccess, isStaff, requireAuth, requireStaff } from '../auth.js';
-import { config, demoPayments, stripeEnabled } from '../config.js';
+import { appUrl, currency, demoPayments, stripeEnabled } from '../prefs.js';
 import { dateStr, idParam, optionalId, parse } from '../util.js';
 import {
   applyStripeSubscription,
@@ -122,7 +122,7 @@ billingRouter.post('/invoices', requireStaff, async (req, res) => {
       nextNumber(),
       body.title,
       body.notes ?? '',
-      body.currency ?? config.currency,
+      body.currency ?? currency(),
       body.due_date ?? null,
       req.user!.id,
     );
@@ -244,7 +244,7 @@ billingRouter.post('/subscriptions', requireStaff, (req, res) => {
     body.client_id,
     body.name,
     body.amount,
-    body.currency ?? config.currency,
+    body.currency ?? currency(),
     body.interval,
     req.user!.id,
   );
@@ -304,6 +304,6 @@ billingRouter.post('/billing/portal', async (req, res) => {
   const clientId = isStaff(u) ? optionalId(req.body?.client_id) : u.client_id;
   if (!clientId) throw new HttpError(400, 'Pick a client');
   const customer = await ensureCustomer(clientId);
-  const session = await stripe().billingPortal.sessions.create({ customer, return_url: `${config.appUrl}/billing` });
+  const session = await stripe().billingPortal.sessions.create({ customer, return_url: `${appUrl()}/billing` });
   res.json({ url: session.url });
 });

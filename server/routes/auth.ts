@@ -11,7 +11,8 @@ import {
   requireAuth,
   verifyPassword,
 } from '../auth.js';
-import { stripeEnabled, config, demoPayments } from '../config.js';
+import { currency, demoPayments, rememberAppUrl, stripeEnabled, stripeTestMode } from '../prefs.js';
+import { hasExampleData } from '../examples.js';
 import { parse } from '../util.js';
 import { THEME_IDS } from '../themes.js';
 
@@ -30,10 +31,12 @@ authRouter.get('/auth/state', (req, res) => {
     needsSetup: userCount === 0,
     stripe: stripeEnabled(),
     demoPayments: demoPayments(),
-    stripeTestMode: config.stripeSecretKey.startsWith('sk_test_') || config.stripeSecretKey.startsWith('rk_test_'),
+    stripeTestMode: stripeTestMode(),
     businessName: getSetting('business_name', 'Micro Manager'),
     defaultTheme: getSetting('default_theme', 'tokyo-night'),
-    currency: config.currency,
+    currency: currency(),
+    onboarded: getSetting('onboarded') === '1' || !!one('SELECT 1 FROM clients LIMIT 1'),
+    hasExampleData: req.user && req.user.role !== 'client' ? hasExampleData() : false,
   });
 });
 
@@ -46,6 +49,7 @@ authRouter.post('/auth/setup', (req, res) => {
       email: z.email().max(200),
       password,
       businessName: z.string().trim().max(100).optional(),
+      origin: z.string().max(300).optional(),
     }),
     req.body,
   );
@@ -56,7 +60,8 @@ authRouter.post('/auth/setup', (req, res) => {
     hashPassword(body.password),
   );
   if (body.businessName) setSetting('business_name', body.businessName);
-  createSession(res, id);
+  rememberAppUrl(body.origin);
+  createSession(req, res, id);
   res.json({ ok: true });
 });
 
@@ -76,7 +81,7 @@ authRouter.post('/auth/login', (req, res) => {
     throw new HttpError(401, 'Email or password is incorrect');
   }
   failures.delete(key);
-  createSession(res, user.id);
+  createSession(req, res, user.id);
   res.json({ user: publicUser(user) });
 });
 
@@ -110,7 +115,7 @@ authRouter.post('/auth/invite/:token', (req, res) => {
     user.id,
   );
   destroyUserSessions(user.id);
-  createSession(res, user.id);
+  createSession(req, res, user.id);
   res.json({ ok: true });
 });
 

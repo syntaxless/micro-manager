@@ -1,7 +1,6 @@
 import crypto from 'node:crypto';
 import type { Request, Response, NextFunction } from 'express';
 import { one, run, type User } from './db.js';
-import { config } from './config.js';
 
 const SESSION_DAYS = 30;
 export const COOKIE = 'mm_session';
@@ -27,14 +26,14 @@ export function randomToken(bytes = 32) {
   return crypto.randomBytes(bytes).toString('base64url');
 }
 
-export function createSession(res: Response, userId: number) {
+export function createSession(req: Request, res: Response, userId: number) {
   const token = randomToken();
   const expires = new Date(Date.now() + SESSION_DAYS * 864e5);
   run('INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)', sha256(token), userId, expires.toISOString());
   res.cookie(COOKIE, token, {
     httpOnly: true,
     sameSite: 'lax',
-    secure: config.secureCookies,
+    secure: req.secure,
     expires,
     path: '/',
   });
