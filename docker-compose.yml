@@ -1,0 +1,17 @@
+services:
+  micro-manager:
+    build: .
+    image: micro-manager
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      APP_URL: ${APP_URL:-http://localhost:3000}
+    volumes:
+      - micro-manager-data:/data
+
+volumes:
+  micro-manager-data:

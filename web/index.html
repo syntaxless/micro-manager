@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <title>Micro Manager</title>
+    <script>
+      // Apply the last theme before first paint to avoid a flash.
+      try {
+        var c = JSON.parse(localStorage.getItem('mm-theme-colors') || 'null');
+        if (c) for (var k in c) document.documentElement.style.setProperty('--' + k, c[k]);
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
